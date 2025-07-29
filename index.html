@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>String Length Extractor</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      background-color: #f5f5f5;
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      margin-top: 15px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    pre {
+      margin-top: 20px;
+      padding: 15px;
+      background: #eaeaea;
+      white-space: pre-wrap;
+      border-left: 4px solid #888;
+    }
+
+
+    #toast {
+      visibility: hidden;
+      min-width: 250px;
+      background-color: #333;
+      color: #fff;
+      text-align: center;
+      border-radius: 5px;
+      padding: 12px 20px;
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      z-index: 1000;
+      font-size: 16px;
+      opacity: 0;
+      transition: opacity 0.5s ease-in-out;
+    }
+
+    #toast.show {
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>Extract Strings of Specific Length</h2>
+
+  <label for="textInput">Enter Text:</label>
+  <textarea id="textInput" rows="6" placeholder="Type or paste your text here..."></textarea>
+
+  <label for="lengthInput">Specify Length:</label>
+  <input type="text" id="lengthInput" placeholder="Enter the exact string length">
+
+  <button onclick="extractStrings()">Extract</button>
+
+  <h3>Results:</h3>
+  <pre id="resultOutput"></pre>
+
+
+  <div id="toast"></div>
+
+  <script>
+  let isJsonMode = false;
+
+  // Toggle button
+  const toggleButton = document.createElement("button");
+  toggleButton.textContent = "Switch to JSON Mode";
+  toggleButton.style.marginLeft = "10px";
+  toggleButton.onclick = () => {
+    isJsonMode = !isJsonMode;
+    toggleButton.textContent = isJsonMode ? "Switch to String Mode" : "Switch to JSON Mode";
+    document.getElementById('lengthInput').placeholder = isJsonMode
+      ? "Enter path and length (e.g. payload.Orders.AmazonOrderId:17)"
+      : "Enter the exact string length";
+    document.getElementById('resultOutput').textContent = '';
+  };
+  document.querySelector("button").after(toggleButton);
+
+  function extractStrings() {
+    const text = document.getElementById('textInput').value;
+    const inputValue = document.getElementById('lengthInput').value.trim();
+    const output = document.getElementById('resultOutput');
+
+    if (isJsonMode) {
+      if (!inputValue.includes(':')) {
+        output.textContent = 'Please enter in format: path:length (e.g. payload.Orders.AmazonOrderId:17)';
+        return;
+      }
+
+      const [pathStr, lengthStr] = inputValue.split(':');
+      const pathParts = pathStr.split('.');
+      const targetLength = parseInt(lengthStr, 10);
+
+      if (isNaN(targetLength) || targetLength <= 0) {
+        output.textContent = 'Invalid length value. Use something like Orders.AmazonOrderId:17';
+        return;
+      }
+
+      let parsedPayloads = [];
+
+      try {
+        // Split and parse multiple JSON objects from textarea
+        const rawBlocks = text.trim().split(/(?<=})\s*(?={)/); // splits between } {
+        rawBlocks.forEach(block => {
+          const parsed = JSON.parse(block);
+          parsedPayloads.push(parsed);
+        });
+      } catch (e) {
+        output.textContent = 'Invalid JSON input. Ensure each object is well-formed.';
+        return;
+      }
+
+      const results = [];
+
+      // Recursive extractor
+      function extractPath(obj, path) {
+        if (!obj || typeof obj !== 'object') return [];
+        const [head, ...tail] = path;
+        if (Array.isArray(obj)) {
+          return obj.flatMap(item => extractPath(item, path));
+        } else if (head in obj) {
+          const next = obj[head];
+          if (tail.length === 0) {
+            return [next];
+          }
+          return extractPath(next, tail);
+        }
+        return [];
+      }
+
+      // Process each top-level payload
+      parsedPayloads.forEach(payload => {
+        const extractedValues = extractPath(payload, pathParts);
+        extractedValues.forEach(val => {
+          if (typeof val === 'string' && val.length === targetLength) {
+            results.push(val);
+          }
+        });
+      });
+
+      if (results.length > 0) {
+        const numberedOutput = results.map((val, i) => `${i + 1}. ${val}`).join('\n');
+        output.textContent = numberedOutput;
+        copyToClipboard(results.join('\n'), results.length);
+      } else {
+        output.textContent = `No string values of length ${targetLength} found at "${pathStr}".`;
+      }
+
+    } else {
+      const length = parseInt(inputValue, 10);
+      if (!length || length <= 0) {
+        output.textContent = 'Please enter a valid positive number for length.';
+        return;
+      }
+
+      const words = text.split(/\s+|[.,;!?()\[\]{}"'`]+/).filter(Boolean);
+      const matched = words.filter(word => word.length === length);
+
+      if (matched.length > 0) {
+        const numberedOutput = matched.map((word, index) => `${index + 1}. ${word}`).join('\n');
+        output.textContent = numberedOutput;
+        const rawOutput = matched.join('\n');
+        copyToClipboard(rawOutput, matched.length);
+      } else {
+        output.textContent = 'No words found with the specified length.';
+      }
+    }
+  }
+
+  function copyToClipboard(text, count) {
+    const tempTextarea = document.createElement('textarea');
+    tempTextarea.value = text;
+    document.body.appendChild(tempTextarea);
+    tempTextarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempTextarea);
+
+    showToast(`${count} item${count !== 1 ? 's' : ''} copied to clipboard`);
+  }
+
+  function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'show';
+    setTimeout(() => {
+      toast.className = toast.className.replace('show', '');
+    }, 3000);
+  }
+</script>
+
+
+
+
+</body>
+
+</html>
